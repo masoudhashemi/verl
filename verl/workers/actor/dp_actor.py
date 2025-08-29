@@ -375,6 +375,15 @@ class DataParallelPPOActor(BasePPOActor):
             "old_log_probs",
             "advantages",
         ]
+        # For LM loss gating, we may need reward/scores
+        if getattr(self.config, "use_lm_loss", False):
+            # Scores are set by the reward manager before advantage computation
+            # Rewards are token_level_scores possibly after KL penalty
+            # Either or both may be present depending on pipeline
+            select_keys += [
+                "token_level_scores",
+                "token_level_rewards",
+            ]
         if self.config.use_kl_loss:
             select_keys.append("ref_log_prob")
         if self.config.tis_imp_ratio_cap > 0:
@@ -461,7 +470,7 @@ class DataParallelPPOActor(BasePPOActor):
                         # compute policy loss
                         policy_loss = pg_loss - entropy_loss * entropy_coeff
                     else:
-                        policy_loss = pg_loss
+                    policy_loss = pg_loss
 
                     if self.config.use_kl_loss:
                         ref_log_prob = model_inputs["ref_log_prob"]
@@ -474,6 +483,33 @@ class DataParallelPPOActor(BasePPOActor):
                         policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
                         micro_batch_metrics["actor/kl_loss"] = kl_loss.detach().item() * loss_scale_factor
                         micro_batch_metrics["actor/kl_coef"] = self.config.kl_loss_coef
+
+                    # Optional LM (SFT) loss on positive rollouts only
+                    if getattr(self.config, "use_lm_loss", False) and getattr(self.config, "lm_loss_coef", 0.0) != 0.0:
+                        filter_source = getattr(self.config, "lm_filter_source", "scores")
+                        threshold = getattr(self.config, "lm_reward_threshold", 0.0)
+                        # Determine sequence-level scalar by aggregating over response tokens
+                        src = None
+                        if filter_source == "scores" and "token_level_scores" in model_inputs:
+                            src = model_inputs["token_level_scores"]
+                        elif filter_source == "rewards" and "token_level_rewards" in model_inputs:
+                            src = model_inputs["token_level_rewards"]
+                        elif filter_source == "advantages" and "advantages" in model_inputs:
+                            src = model_inputs["advantages"]
+                        # Fallback if requested source not available
+                        if src is None:
+                            # Try a reasonable default
+                            src = model_inputs.get("token_level_scores", model_inputs.get("token_level_rewards", None))
+                        if src is not None:
+                            # src/log_prob/response_mask are (bs, response_len)
+                            seq_vals = (src * response_mask).sum(dim=-1)
+                            seq_pos = (seq_vals > threshold).to(response_mask.dtype).unsqueeze(-1)
+                            lm_loss_mask = response_mask * seq_pos
+                            # LM loss is -log p(y), aggregated with the same agg mode
+                            lm_loss = agg_loss(loss_mat=-log_prob, loss_mask=lm_loss_mask, loss_agg_mode=loss_agg_mode)
+                            policy_loss = policy_loss + self.config.lm_loss_coef * lm_loss
+                            micro_batch_metrics["actor/lm_loss"] = lm_loss.detach().item() * loss_scale_factor
+                            micro_batch_metrics["actor/lm_coef"] = float(self.config.lm_loss_coef)
 
                     if self.config.use_dynamic_bsz:
                         # relative to the dynamic bsz

@@ -352,6 +352,28 @@ class MegatronPPOActor(BasePPOActor):
             metrics["actor/kl_loss"] = kl_loss.detach().item()
             metrics["actor/kl_coef"] = self.config.kl_loss_coef
 
+        # Optional LM (SFT) loss on positive rollouts only
+        if getattr(self.config, "use_lm_loss", False) and getattr(self.config, "lm_loss_coef", 0.0) != 0.0:
+            filter_source = getattr(self.config, "lm_filter_source", "scores")
+            threshold = getattr(self.config, "lm_reward_threshold", 0.0)
+            src = None
+            if filter_source == "scores" and "token_level_scores" in data:
+                src = data["token_level_scores"]
+            elif filter_source == "rewards" and "token_level_rewards" in data:
+                src = data["token_level_rewards"]
+            elif filter_source == "advantages" and "advantages" in data:
+                src = data["advantages"]
+            if src is None:
+                src = data.get("token_level_scores", data.get("token_level_rewards", None))
+            if src is not None:
+                seq_vals = (src * response_mask).sum(dim=-1)
+                seq_pos = (seq_vals > threshold).to(response_mask.dtype).unsqueeze(-1)
+                lm_loss_mask = response_mask * seq_pos
+                lm_loss = agg_loss(loss_mat=-log_prob, loss_mask=lm_loss_mask, loss_agg_mode=loss_agg_mode)
+                policy_loss = policy_loss + self.config.lm_loss_coef * lm_loss
+                metrics["actor/lm_loss"] = lm_loss.detach().item()
+                metrics["actor/lm_coef"] = float(self.config.lm_loss_coef)
+
         return policy_loss, metrics
 
     def forward_backward_batch(

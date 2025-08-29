@@ -1222,6 +1222,74 @@ def compute_policy_loss_geo_mean(
     return pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower
 
 
+@register_policy_loss("gppo")
+def compute_policy_loss_gppo(
+    old_log_prob: torch.Tensor,
+    log_prob: torch.Tensor,
+    advantages: torch.Tensor,
+    response_mask: torch.Tensor,
+    loss_agg_mode: str = "token-mean",
+    config: Optional[DictConfig | ActorConfig] = None,
+    rollout_log_probs=None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Gradient-Preserving clipping Policy Optimization (GPPO).
+
+    Implements forward clipping like PPO but preserves gradients outside the clip region
+    by replacing the backward factor with a bounded constant (1±ε) depending on sign(adv)
+    and whether the ratio is outside bounds.
+
+    Reference: Klear-Reasoner (Su et al., 2025).
+    """
+
+    assert config is not None
+    assert not isinstance(config, AlgoConfig)
+
+    clip_ratio = config.clip_ratio
+    clip_ratio_low = config.clip_ratio_low if config.clip_ratio_low is not None else clip_ratio
+    clip_ratio_high = config.clip_ratio_high if config.clip_ratio_high is not None else clip_ratio
+
+    # r = exp(log_prob - old_log_prob)
+    negative_approx_kl = log_prob - old_log_prob
+    negative_approx_kl = torch.clamp(negative_approx_kl, min=-20.0, max=20.0)
+    ratio = torch.exp(negative_approx_kl)
+    ppo_kl = verl_F.masked_mean(-negative_approx_kl, response_mask)
+
+    lower = 1.0 - clip_ratio_low
+    upper = 1.0 + clip_ratio_high
+
+    # PPO forward (min) -> equivalent max on negative form
+    pg_unclipped = -advantages * ratio
+    pg_clipped = -advantages * torch.clamp(ratio, lower, upper)
+    pg_forward = torch.maximum(pg_unclipped, pg_clipped)
+
+    # clipping stats
+    pg_clipfrac = verl_F.masked_mean((pg_clipped > pg_unclipped).float(), response_mask)
+    clipped_lower_mask = (advantages < 0) & (ratio < lower)
+    pg_clipfrac_lower = verl_F.masked_mean(clipped_lower_mask.float(), response_mask)
+
+    # GPPO gradient-preserving factor F
+    outside_upper = (advantages > 0) & (ratio > upper)
+    outside_lower = (advantages < 0) & (ratio < lower)
+    F = torch.where(outside_upper, torch.full_like(ratio, upper), torch.where(outside_lower, torch.full_like(ratio, lower), ratio))
+
+    # Straight-through trick: keep forward = PPO forward, but use gradients from -A * F
+    # Build a surrogate whose forward equals pg_forward and backward equals -A * F
+    # r_bp has gradient of F, with forward value equal to ratio
+    r_bp = ratio.detach() + (F - F.detach())
+    grad_part = -advantages * r_bp
+    surrogate = pg_forward.detach() + grad_part - grad_part.detach()
+
+    if config.tis_imp_ratio_cap > 0 and rollout_log_probs is not None:
+        tis_imp_ratio = torch.exp(old_log_prob - rollout_log_probs)
+        tis_imp_ratio = torch.clamp(tis_imp_ratio, max=config.tis_imp_ratio_cap)
+        surrogate = surrogate * tis_imp_ratio
+
+    pg_loss = agg_loss(loss_mat=surrogate, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+
+    return pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower
+
+
 def compute_entropy_loss(logits, response_mask, loss_agg_mode: str = "token-mean"):
     """Compute categorical entropy loss (For backward compatibility)
 

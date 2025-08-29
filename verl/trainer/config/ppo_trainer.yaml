@@ -96,6 +96,22 @@ actor_rollout_ref:
     # Whether to enable loading a remote code model
     trust_remote_code: false
 
+  # Actor-specific training options (PPO/GRPO)
+  actor:
+    # [Optional] Add an auxiliary SFT (LM) loss using response tokens.
+    # Only sequences with positive rollout feedback contribute to this loss.
+    use_lm_loss: false
+    lm_loss_coef: 0.0
+    # Source to decide positivity: "scores" (pre-KL), "rewards" (post-KL if enabled), or "advantages".
+    lm_filter_source: scores
+    # Sequence considered positive if its aggregated value > threshold
+    lm_reward_threshold: 0.0
+
+    # Truncated Importance Sampling (TIS) cap; set > 0 to enable off-policy correction.
+    # Requires `actor_rollout_ref.rollout.calculate_log_probs: true` to provide rollout-time log-probs.
+    # Not needed for on-policy updates, LM loss, KL, or GPPO by itself.
+    tis_imp_ratio_cap: -1
+
   # Rollout model config.
   rollout:
 
@@ -108,6 +124,11 @@ actor_rollout_ref:
 
     # for huge model, layered summon can save memory (prevent OOM) but make it slower
     layered_summon: False
+
+    # Whether to compute rollout-time token log-probs. Needed only when using TIS (actor.tis_imp_ratio_cap > 0)
+    # to supply `rollout_log_probs` for truncated importance sampling.
+    # Not required for on-policy PPO/GRPO/GPPO, LM loss, or KL.
+    calculate_log_probs: False
 
 # custom reward function definition
 custom_reward_function:

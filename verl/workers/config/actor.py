@@ -110,6 +110,18 @@ class ActorConfig(BaseConfig):
     use_torch_compile: bool = True
     kl_loss_coef: float = 0.001
     kl_loss_type: str = "low_var_kl"
+    # LM (SFT) loss options
+    # When enabled, adds a masked LM loss on response tokens for sequences
+    # that pass a positive-feedback filter from rollouts.
+    use_lm_loss: bool = False
+    lm_loss_coef: float = 0.0
+    # Source used to decide which sequences are "positive":
+    #   - "scores": use token_level_scores (pre-KL)
+    #   - "rewards": use token_level_rewards (post-KL if enabled)
+    #   - "advantages": use advantages
+    lm_filter_source: str = "scores"
+    # Sequence is treated as positive if its aggregated value > threshold
+    lm_reward_threshold: float = 0.0
     ppo_epochs: int = 1
     shuffle: bool = False
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
