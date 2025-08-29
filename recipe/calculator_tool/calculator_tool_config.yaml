@@ -1,0 +1,17 @@
+tools:
+  - class_name: "recipe.calculator_tool.calculator_tool.CalculatorTool"
+    config:
+      type: native
+    tool_schema:
+      type: "function"
+      function:
+        name: "calculator"
+        description: "Evaluate a basic arithmetic expression."
+        parameters:
+          type: "object"
+          properties:
+            expression:
+              type: "string"
+              description: "Arithmetic expression, e.g. '12 + 7 * (3 - 1)'."
+          required: ["expression"]
+
