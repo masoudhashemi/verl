@@ -42,6 +42,7 @@ from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, Ra
 from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.config import AlgoConfig
 from verl.trainer.ppo import core_algos
+from verl.trainer.ppo.aspo import apply_aspo_shaping
 from verl.trainer.ppo.core_algos import AdvantageEstimator, agg_loss
 from verl.trainer.ppo.metric_utils import (
     compute_data_metrics,
@@ -1099,6 +1100,53 @@ class RayPPOTrainer:
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                             config=self.config.algorithm,
                         )
+
+                        # Optional: ASPO advantage shaping (policy-only)
+                        if (
+                            hasattr(self.config.algorithm, "aspo")
+                            and self.config.algorithm.aspo is not None
+                            and bool(self.config.algorithm.aspo.get("enabled", False))
+                        ):
+                            aspo_cfg = self.config.algorithm.aspo
+                            # Prepare inputs
+                            A = batch.batch["advantages"]
+                            resp_mask = batch.batch["response_mask"]
+                            # Fallback group ids if uid not present: each sample isolated
+                            group_ids = batch.non_tensor_batch.get(
+                                "uid", np.arange(A.shape[0], dtype=np.int64)
+                            )
+                            # token-level rewards for correctness heuristic
+                            token_level_rewards = batch.batch["token_level_rewards"]
+                            responses = batch.batch["responses"]
+
+                            # Optional code_pass from reward extras
+                            code_pass_mask = None
+                            if "code_pass" in batch.non_tensor_batch:
+                                val = batch.non_tensor_batch["code_pass"]
+                                try:
+                                    code_pass_mask = torch.tensor(val, dtype=torch.bool, device=A.device)
+                                except Exception:
+                                    pass
+
+                            shaped = apply_aspo_shaping(
+                                advantages=A,
+                                response_mask=resp_mask,
+                                group_ids=group_ids,
+                                token_level_rewards=token_level_rewards,
+                                responses=responses,
+                                tokenizer=self.tokenizer,
+                                non_tensor_batch=batch.non_tensor_batch,
+                                delta=float(aspo_cfg.get("delta", -2.0)),
+                                k=float(aspo_cfg.get("k", 0.7)),
+                                require_code_pass=bool(aspo_cfg.get("require_code_pass", False)),
+                                prefer_structured_tool_calls=bool(
+                                    aspo_cfg.code_detection.get("prefer_structured_tool_calls", True)
+                                ),
+                                markdown_backticks=bool(aspo_cfg.code_detection.get("markdown_backticks", True)),
+                                html_code_tags=bool(aspo_cfg.code_detection.get("html_code_tags", True)),
+                                code_pass_mask=code_pass_mask,
+                            )
+                            batch.batch["advantages"] = shaped
 
                     # update critic
                     if self.use_critic:

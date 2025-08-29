@@ -194,6 +194,17 @@ algorithm:
     # Power used for weight scaling in "pow" method
     weight_pow: 2.0
 
+  # Advantage Shaping Policy Optimization (ASPO)
+  aspo:
+    enabled: false
+    delta: -2.0
+    k: 0.7
+    require_code_pass: false
+    code_detection:
+      prefer_structured_tool_calls: true
+      markdown_backticks: true
+      html_code_tags: true
+
 # config for the trainer
 trainer:
 

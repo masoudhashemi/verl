@@ -57,6 +57,31 @@ class FilterGroupsConfig(BaseConfig):
 
 
 @dataclass
+class AspoConfig(BaseConfig):
+    """ASPO (Advantage Shaping Policy Optimization) config.
+
+    Args:
+        enabled: enable/disable ASPO shaping.
+        delta: negative scaling factor; more negative nudges earlier code.
+        k: clip fraction relative to |base advantage|.
+        require_code_pass: optionally require successful tool execution (if available) to be eligible.
+        code_detection: toggles for detection strategies.
+    """
+
+    enabled: bool = False
+    delta: float = -2.0
+    k: float = 0.7
+    require_code_pass: bool = False
+    code_detection: dict[str, Any] = field(
+        default_factory=lambda: {
+            "prefer_structured_tool_calls": True,
+            "markdown_backticks": True,
+            "html_code_tags": True,
+        }
+    )
+
+
+@dataclass
 class AlgoConfig(BaseConfig):
     """Configuration for the algorithm.
 
@@ -85,3 +110,4 @@ class AlgoConfig(BaseConfig):
     use_pf_ppo: bool = False
     pf_ppo: dict[str, Any] = field(default_factory=dict)
     filter_groups: Optional[FilterGroupsConfig] = None
+    aspo: Optional[AspoConfig] = field(default_factory=AspoConfig)
