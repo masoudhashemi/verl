@@ -29,13 +29,35 @@ python3 create_dataset.py
 We create a train set and a val set. Both of them are used of SFT and RL. You can specify the total number of data, min/max length and data path.
 
 To run the SFT
+
 ```bash
 bash train_sft.sh
 ```
+
 We train SFT for 3 epochs. After 3 epochs, the validation score is around 0.12.
 
+```bash
+python -m verl.model_merger merge --backend fsdp   --local_dir /home/toolkit/verl/recipe/char_count/models/sft/global_step_105   --target_dir /home/toolkit/verl/recipe/char_count/models/sft/hf_merged
+```
+
+or add
+
+```bash
+trainer.checkpoint.save_contents='["model","optimizer","extra","hf_model"]'
+```
+
+to SFT training.
+
 To run GRPO
+
 ```bash
 bash train_grpo.sh
 ```
+
 We train GRPO for 2 epochs. After 2 epochs, the validation score is around 0.36.
+
+Check the logs with
+
+```bash
+tensorboard --logdir /home/toolkit/verl/recipe/char_count/tensorboard_log/verl_example/smol135m_grpo --bind_all --port 6006
+```

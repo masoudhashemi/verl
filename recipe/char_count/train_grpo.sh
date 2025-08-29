@@ -1,5 +1,7 @@
 set -x
 
+export PYTHONPATH=/home/toolkit/verl:$PYTHONPATH
+
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -10,7 +12,7 @@ python3 -m verl.trainer.main_ppo \
     data.max_response_length=128 \
     data.filter_overlong_prompts=False \
     data.truncation='error' \
-    actor_rollout_ref.model.path=./models/sft/global_step_105 \
+    actor_rollout_ref.model.path=/home/toolkit/verl/recipe/char_count/models/sft/hf_merged \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=16 \
@@ -23,6 +25,10 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.actor.use_lm_loss=True \
+    actor_rollout_ref.actor.lm_loss_coef=0.1 \
+    actor_rollout_ref.actor.lm_filter_source=scores \
+    actor_rollout_ref.actor.lm_reward_threshold=0.0 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
@@ -32,12 +38,13 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console","tensorboard"]' \
     trainer.project_name='verl_example' \
-    trainer.experiment_name='smol135m_grpo' \
+    trainer.experiment_name='smol135m_grpo_lm_loss' \
+    trainer.default_local_dir=/home/toolkit/verl/recipe/char_count/models/rl/smol135m_grpo_lm_loss \
     trainer.val_before_train=True \
-    trainer.n_gpus_per_node=1 \
+    trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \
-    trainer.save_freq=-1 \
+    trainer.save_freq=10 \
     trainer.test_freq=5 \
     trainer.total_epochs=2 \
-    custom_reward_function.path=recipe/char_count/reward_function.py \
+    custom_reward_function.path=/home/toolkit/verl/recipe/char_count/reward_function.py \
     custom_reward_function.name=char_count_reward_function
